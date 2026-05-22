@@ -7,7 +7,7 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const DEFAULT_CATEGORIES = [
-  { id: 'all', name: '全部', type: 'system', icon: 'D' },
+  { id: 'all', name: '全部', type: 'system', icon: 'N' },
 ];
 
 const LEGACY_SYSTEM_CATEGORY_IDS = new Set(['frequent', 'apps', 'files', 'folders', 'uncategorized']);
@@ -31,6 +31,7 @@ function createWindow() {
     backgroundColor: '#0d0e0f',
     thickFrame: true,
     titleBarStyle: 'hidden',
+    title: 'NexDock',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -69,6 +70,7 @@ function normalizeCategories(categories) {
           id: category.id,
           name: category.name.trim(),
           type: 'custom',
+          pinned: category.pinned === true,
           icon: typeof category.icon === 'string' && category.icon.trim()
             ? category.icon.trim().slice(0, 4)
             : categoryIconForName(category.name),
@@ -293,13 +295,13 @@ async function readWindowsAssociatedIconDataUrl(targetPath) {
   }
 
   const script = `
-$targetPath = $env:DESKDOCK_ICON_TARGET
+$targetPath = $env:NEXDOCK_ICON_TARGET
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;
 using System.Runtime.InteropServices;
 
-public static class DeskDockIconNative {
+public static class NexDockIconNative {
   [DllImport("User32.dll", CharSet = CharSet.Unicode)]
   public static extern int PrivateExtractIcons(string lpszFile, int nIconIndex, int cxIcon, int cyIcon, IntPtr[] phicon, int[] piconid, int nIcons, int flags);
 
@@ -326,13 +328,13 @@ function Write-IconPngBase64($icon) {
 
 $handles = New-Object IntPtr[] 1
 $ids = New-Object int[] 1
-$count = [DeskDockIconNative]::PrivateExtractIcons($targetPath, 0, 128, 128, $handles, $ids, 1, 0)
+$count = [NexDockIconNative]::PrivateExtractIcons($targetPath, 0, 128, 128, $handles, $ids, 1, 0)
 
 if ($count -gt 0 -and $handles[0] -ne [IntPtr]::Zero) {
   try {
     if (Write-IconPngBase64 ([System.Drawing.Icon]::FromHandle($handles[0]))) { exit 0 }
   } finally {
-    [DeskDockIconNative]::DestroyIcon($handles[0]) | Out-Null
+    [NexDockIconNative]::DestroyIcon($handles[0]) | Out-Null
   }
 }
 
@@ -346,7 +348,7 @@ exit 2
       ['-NoProfile', '-NonInteractive', '-Command', script],
       {
         env: {
-          DESKDOCK_ICON_TARGET: targetPath,
+          NEXDOCK_ICON_TARGET: targetPath,
           PATH: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0;C:\\Windows\\System32;C:\\Windows',
           SystemRoot: 'C:\\Windows',
           WINDIR: 'C:\\Windows',
@@ -453,6 +455,7 @@ function publicStore(store) {
 }
 
 app.whenReady().then(() => {
+  app.setName('NexDock');
   Menu.setApplicationMenu(null);
 
   ipcMain.handle('app:get-version-info', () => ({
@@ -537,6 +540,7 @@ app.whenReady().then(() => {
       name,
       icon,
       type: 'custom',
+      pinned: false,
     };
 
     store.categories.push(category);
@@ -562,6 +566,48 @@ app.whenReady().then(() => {
 
     category.name = name;
     category.icon = icon;
+    await writeStore(store);
+    return publicStore(store);
+  });
+
+  ipcMain.handle('launcher:remove-category', async (event, id) => {
+    const store = await readStore();
+    const category = store.categories.find((entry) => entry.id === id && entry.type !== 'system');
+
+    if (!category) {
+      throw new Error('分类不存在');
+    }
+
+    store.categories = store.categories.filter((entry) => entry.id !== id);
+    store.items.forEach((item) => {
+      if (item.categoryId === id) {
+        item.categoryId = 'all';
+      }
+    });
+
+    await writeStore(store);
+    return publicStore(store);
+  });
+
+  ipcMain.handle('launcher:set-category-pinned', async (event, payload = {}) => {
+    const store = await readStore();
+    const category = store.categories.find((entry) => entry.id === payload.id && entry.type !== 'system');
+
+    if (!category) {
+      throw new Error('分类不存在');
+    }
+
+    category.pinned = payload.pinned === true;
+
+    if (category.pinned) {
+      const customCategories = store.categories.filter((entry) => entry.type !== 'system');
+      store.categories = [
+        ...DEFAULT_CATEGORIES,
+        category,
+        ...customCategories.filter((entry) => entry.id !== category.id),
+      ];
+    }
+
     await writeStore(store);
     return publicStore(store);
   });

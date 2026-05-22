@@ -4,6 +4,7 @@ const state = {
   activeCategoryId: 'all',
   query: '',
   contextItemId: null,
+  contextCategoryId: null,
   draggedItemId: null,
   draggedItemCategoryId: null,
   dragReadyItemId: null,
@@ -13,7 +14,11 @@ const state = {
   dragReadyCategoryId: null,
   suppressCategoryClick: false,
   categoryDialogResolve: null,
+  tagDialogItemId: null,
+  tagDialogTags: [],
 };
+
+const LONG_PRESS_DRAG_DELAY_MS = 240;
 
 const typeLabels = {
   app: '软件',
@@ -37,6 +42,8 @@ const itemCount = document.querySelector('#itemCount');
 const statusText = document.querySelector('#statusText');
 const activeCategoryLabel = document.querySelector('#activeCategoryLabel');
 const contextMenu = document.querySelector('#contextMenu');
+const categoryContextMenu = document.querySelector('#categoryContextMenu');
+const categoryPinMenuButton = document.querySelector('#categoryPinMenuButton');
 const settingsButton = document.querySelector('#settingsButton');
 const settingsPage = document.querySelector('#settingsPage');
 const backHomeButton = document.querySelector('#backHomeButton');
@@ -51,6 +58,14 @@ const categoryDialogTitle = document.querySelector('#categoryDialogTitle');
 const categoryNameInput = document.querySelector('#categoryNameInput');
 const categoryIconInput = document.querySelector('#categoryIconInput');
 const cancelCategoryDialogButton = document.querySelector('#cancelCategoryDialog');
+const tagDialog = document.querySelector('#tagDialog');
+const tagDialogForm = document.querySelector('#tagDialogForm');
+const tagDialogItemName = document.querySelector('#tagDialogItemName');
+const tagNameInput = document.querySelector('#tagNameInput');
+const tagList = document.querySelector('#tagList');
+const tagEmptyState = document.querySelector('#tagEmptyState');
+const cancelTagDialogButton = document.querySelector('#cancelTagDialog');
+const saveTagDialogButton = document.querySelector('#saveTagDialog');
 
 function setStatus(message) {
   statusText.textContent = message;
@@ -99,6 +114,10 @@ function categoryIconForName(name) {
 
 function categoryIcon(category) {
   return category.icon || categoryIconForName(category.name);
+}
+
+function isPinnedCategory(category) {
+  return category?.pinned === true;
 }
 
 function itemTags(item) {
@@ -156,14 +175,19 @@ function renderCategories() {
 
   const orderedCategories = [
     ...state.categories.filter((category) => category.id === 'all'),
-    ...state.categories.filter((category) => category.id !== 'all'),
+    ...state.categories.filter((category) => category.id !== 'all' && isPinnedCategory(category)),
+    ...state.categories.filter((category) => category.id !== 'all' && !isPinnedCategory(category)),
   ];
 
   for (const category of orderedCategories) {
     const button = document.createElement('button');
     const isCustom = category.id !== 'all';
     button.type = 'button';
-    button.className = category.id === state.activeCategoryId ? 'category active' : 'category';
+    button.className = [
+      'category',
+      category.id === state.activeCategoryId ? 'active' : '',
+      isPinnedCategory(category) ? 'pinned' : '',
+    ].filter(Boolean).join(' ');
     button.dataset.id = category.id;
     button.draggable = isCustom;
     button.title = isCustom ? '双击重命名，长按后拖动排序' : '全部入口';
@@ -198,14 +222,16 @@ function renderCategories() {
       }
     });
     button.addEventListener('drop', async (event) => {
-      if (!state.draggedItemId) {
+      const draggedItemId = state.draggedItemId || event.dataTransfer.getData('text/plain');
+
+      if (!draggedItemId) {
         return;
       }
 
       event.preventDefault();
       button.classList.remove('drag-over');
       state.itemDragCommitted = true;
-      await moveItemToCategory(state.draggedItemId, category.id);
+      await moveItemToCategory(draggedItemId, category.id);
     });
 
     if (isCustom) {
@@ -217,14 +243,14 @@ function renderCategories() {
       });
       button.addEventListener('contextmenu', (event) => {
         event.preventDefault();
-        renameCategory(category.id);
+        showCategoryContextMenu(event, category.id);
       });
       button.addEventListener('pointerdown', () => {
         pressTimer = window.setTimeout(() => {
           state.dragReadyCategoryId = category.id;
           button.classList.add('drag-ready');
           setStatus('继续拖动分类可调整顺序');
-        }, 420);
+        }, LONG_PRESS_DRAG_DELAY_MS);
       });
       button.addEventListener('pointerup', () => {
         window.clearTimeout(pressTimer);
@@ -290,6 +316,18 @@ function orderedVisibleItemIdsFromDom() {
   return Array.from(itemGrid.querySelectorAll('.entry-card[data-id]')).map((card) => card.dataset.id);
 }
 
+function orderedVisibleItemIdsFromState() {
+  return filteredItems().map((item) => item.id);
+}
+
+function hasVisibleItemOrderChanged() {
+  const currentOrder = orderedVisibleItemIdsFromDom();
+  const originalOrder = orderedVisibleItemIdsFromState();
+
+  return currentOrder.length === originalOrder.length
+    && currentOrder.some((id, index) => id !== originalOrder[index]);
+}
+
 function clearItemDropPreview() {
   itemGrid.querySelectorAll('.entry-card.drop-before, .entry-card.drop-after').forEach((card) => {
     card.classList.remove('drop-before', 'drop-after', 'drag-over');
@@ -329,7 +367,7 @@ function renderItem(item) {
   card.className = 'entry-card';
   card.tabIndex = 0;
   card.dataset.id = item.id;
-  card.draggable = false;
+  card.draggable = true;
   const safeName = escapeHtml(item.name);
   const tags = itemTags(item);
   const tagMarkup = tags.length
@@ -353,10 +391,9 @@ function renderItem(item) {
   card.addEventListener('pointerdown', () => {
     pressTimer = window.setTimeout(() => {
       state.dragReadyItemId = item.id;
-      card.draggable = true;
       card.classList.add('drag-ready');
       setStatus('继续拖动图标可调整顺序或移动分类');
-    }, 420);
+    }, LONG_PRESS_DRAG_DELAY_MS);
   });
   card.addEventListener('pointerup', () => {
     window.clearTimeout(pressTimer);
@@ -378,18 +415,22 @@ function renderItem(item) {
     event.dataTransfer.setData('text/plain', item.id);
     card.classList.add('dragging');
   });
-  card.addEventListener('dragend', () => {
-    const shouldRestorePreview = state.draggedItemId && !state.itemDragCommitted;
+  card.addEventListener('dragend', async () => {
+    const wasDragging = state.draggedItemId === item.id;
+    const shouldPersistOrder = wasDragging && !state.itemDragCommitted && hasVisibleItemOrderChanged();
+    const shouldRestorePreview = wasDragging && !state.itemDragCommitted && !shouldPersistOrder;
+
     state.draggedItemId = null;
     state.draggedItemCategoryId = null;
     state.dragReadyItemId = null;
     state.dragPreviewCategoryId = null;
     state.itemDragCommitted = false;
-    card.draggable = false;
     clearItemDropPreview();
     card.classList.remove('drag-ready', 'dragging');
 
-    if (shouldRestorePreview) {
+    if (shouldPersistOrder) {
+      await persistVisibleItemOrder();
+    } else if (shouldRestorePreview) {
       renderItems();
     }
   });
@@ -472,6 +513,83 @@ function openCategoryDialog({ title, name = '', icon = '' }) {
   });
 }
 
+function normalizeTagInput(value) {
+  return String(value || '').trim();
+}
+
+function normalizedTagList(tags) {
+  const seen = new Set();
+  const normalizedTags = [];
+
+  for (const tag of tags) {
+    const normalizedTag = normalizeTagInput(tag);
+    const key = normalizedTag.toLowerCase();
+
+    if (!normalizedTag || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    normalizedTags.push(normalizedTag);
+
+    if (normalizedTags.length >= 12) {
+      break;
+    }
+  }
+
+  return normalizedTags;
+}
+
+function renderTagDialogTags() {
+  tagList.innerHTML = '';
+
+  for (const tag of state.tagDialogTags) {
+    const tagButton = document.createElement('button');
+    tagButton.className = 'tag-pill editable';
+    tagButton.type = 'button';
+    tagButton.dataset.tag = tag;
+    tagButton.innerHTML = `<span>${escapeHtml(tag)}</span><strong aria-hidden="true">×</strong>`;
+    tagButton.title = `删除标签 ${tag}`;
+    tagList.append(tagButton);
+  }
+
+  tagEmptyState.hidden = state.tagDialogTags.length > 0;
+}
+
+function addTagFromInput() {
+  const nextTag = normalizeTagInput(tagNameInput.value);
+
+  if (!nextTag) {
+    return;
+  }
+
+  state.tagDialogTags = normalizedTagList([...state.tagDialogTags, nextTag]);
+  tagNameInput.value = '';
+  renderTagDialogTags();
+}
+
+function openTagDialog(item) {
+  state.tagDialogItemId = item.id;
+  state.tagDialogTags = normalizedTagList(itemTags(item));
+  tagDialogItemName.textContent = item.name;
+  tagNameInput.value = '';
+  renderTagDialogTags();
+  tagDialog.classList.add('visible');
+  tagDialog.setAttribute('aria-hidden', 'false');
+
+  window.setTimeout(() => {
+    tagNameInput.focus();
+  }, 0);
+}
+
+function closeTagDialog() {
+  tagDialog.classList.remove('visible');
+  tagDialog.setAttribute('aria-hidden', 'true');
+  state.tagDialogItemId = null;
+  state.tagDialogTags = [];
+  tagNameInput.value = '';
+}
+
 async function refreshStore() {
   const store = await window.electronAPI.launcher.list();
   state.categories = store.categories;
@@ -538,6 +656,52 @@ async function renameCategory(id) {
     setStatus('分类已重命名');
   } catch (error) {
     setStatus(`重命名分类失败：${error.message}`);
+  }
+}
+
+async function setCategoryPinned(id, pinned) {
+  const categories = customCategories();
+  const category = categories.find((entry) => entry.id === id);
+
+  if (!category) {
+    return;
+  }
+
+  try {
+    const store = await window.electronAPI.launcher.setCategoryPinned(id, pinned);
+    state.categories = store.categories;
+    state.items = store.items;
+    render();
+    setStatus(pinned ? '分类已置顶' : '分类已取消置顶');
+  } catch (error) {
+    setStatus(`更新分类置顶失败：${error.message}`);
+  }
+}
+
+async function removeCategory(id) {
+  const category = state.categories.find((entry) => entry.id === id && entry.id !== 'all');
+
+  if (!category) {
+    return;
+  }
+
+  if (!confirm(`删除分类「${category.name}」？该分类下的图标会回到全部。`)) {
+    return;
+  }
+
+  try {
+    const store = await window.electronAPI.launcher.removeCategory(id);
+    state.categories = store.categories;
+    state.items = store.items;
+
+    if (state.activeCategoryId === id) {
+      state.activeCategoryId = 'all';
+    }
+
+    render();
+    setStatus('分类已删除');
+  } catch (error) {
+    setStatus(`删除分类失败：${error.message}`);
   }
 }
 
@@ -717,23 +881,25 @@ async function editItemTags(id) {
     return;
   }
 
-  const currentTags = itemTags(item).join(', ');
-  const input = prompt('输入标签，多个标签用逗号分隔', currentTags);
+  openTagDialog(item);
+}
 
-  if (input === null) {
+async function saveTagDialog() {
+  const id = state.tagDialogItemId;
+
+  if (!id) {
+    closeTagDialog();
     return;
   }
 
-  const tags = input
-    .split(/[,，]/)
-    .map((tag) => tag.trim())
-    .filter(Boolean)
-    .slice(0, 12);
+  addTagFromInput();
 
   try {
+    const tags = normalizedTagList(state.tagDialogTags);
     const store = await window.electronAPI.launcher.updateItem({ id, tags });
     state.categories = store.categories;
     state.items = store.items;
+    closeTagDialog();
     render();
     setStatus(tags.length ? '标签已更新' : '标签已清空');
   } catch (error) {
@@ -757,6 +923,7 @@ async function syncIcon(id) {
 
 function showContextMenu(event, itemId) {
   state.contextItemId = itemId;
+  hideCategoryContextMenu();
   contextMenu.style.left = `${event.clientX}px`;
   contextMenu.style.top = `${event.clientY}px`;
   contextMenu.setAttribute('aria-hidden', 'false');
@@ -768,11 +935,33 @@ function hideContextMenu() {
   contextMenu.setAttribute('aria-hidden', 'true');
 }
 
+function showCategoryContextMenu(event, categoryId) {
+  const category = state.categories.find((entry) => entry.id === categoryId);
+
+  state.contextCategoryId = categoryId;
+  hideContextMenu();
+  categoryPinMenuButton.textContent = isPinnedCategory(category) ? '取消置顶' : '置顶';
+  categoryContextMenu.style.left = `${event.clientX}px`;
+  categoryContextMenu.style.top = `${event.clientY}px`;
+  categoryContextMenu.setAttribute('aria-hidden', 'false');
+  categoryContextMenu.classList.add('visible');
+}
+
+function hideCategoryContextMenu() {
+  categoryContextMenu.classList.remove('visible');
+  categoryContextMenu.setAttribute('aria-hidden', 'true');
+}
+
+function hideMenus() {
+  hideContextMenu();
+  hideCategoryContextMenu();
+}
+
 function showSettingsPage() {
   shell.hidden = true;
   settingsPage.hidden = false;
   backHomeButton.focus();
-  hideContextMenu();
+  hideMenus();
 }
 
 function showHomePage() {
@@ -816,6 +1005,31 @@ cancelCategoryDialogButton.addEventListener('click', () => {
 categoryDialog.addEventListener('click', (event) => {
   if (event.target === categoryDialog) {
     closeCategoryDialog(null);
+  }
+});
+
+tagDialogForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  addTagFromInput();
+});
+
+tagList.addEventListener('click', (event) => {
+  const tagButton = event.target.closest('.tag-pill[data-tag]');
+
+  if (!tagButton) {
+    return;
+  }
+
+  state.tagDialogTags = state.tagDialogTags.filter((tag) => tag !== tagButton.dataset.tag);
+  renderTagDialogTags();
+});
+
+cancelTagDialogButton.addEventListener('click', closeTagDialog);
+saveTagDialogButton.addEventListener('click', saveTagDialog);
+
+tagDialog.addEventListener('click', (event) => {
+  if (event.target === tagDialog) {
+    closeTagDialog();
   }
 });
 
@@ -890,7 +1104,7 @@ document.addEventListener('drop', async (event) => {
 contextMenu.addEventListener('click', async (event) => {
   const action = event.target.dataset.action;
   const id = state.contextItemId;
-  hideContextMenu();
+  hideMenus();
 
   if (!id || !action) {
     return;
@@ -913,7 +1127,26 @@ contextMenu.addEventListener('click', async (event) => {
   }
 });
 
-document.addEventListener('click', hideContextMenu);
+categoryContextMenu.addEventListener('click', async (event) => {
+  const action = event.target.dataset.action;
+  const id = state.contextCategoryId;
+  hideMenus();
+
+  if (!id || !action) {
+    return;
+  }
+
+  if (action === 'rename') {
+    await renameCategory(id);
+  } else if (action === 'pin') {
+    const category = state.categories.find((entry) => entry.id === id);
+    await setCategoryPinned(id, !isPinnedCategory(category));
+  } else if (action === 'remove') {
+    await removeCategory(id);
+  }
+});
+
+document.addEventListener('click', hideMenus);
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     if (!settingsPage.hidden) {
@@ -926,7 +1159,12 @@ document.addEventListener('keydown', (event) => {
       return;
     }
 
-    hideContextMenu();
+    if (tagDialog.classList.contains('visible')) {
+      closeTagDialog();
+      return;
+    }
+
+    hideMenus();
   }
 
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {

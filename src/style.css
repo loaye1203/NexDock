@@ -407,6 +407,13 @@ body.dragging-files .app-frame {
   padding: 0 5px;
 }
 
+.category.pinned .category-icon {
+  background: rgba(255, 197, 51, 0.12);
+  border-color: #ffc533;
+  box-shadow: 0 0 0 2px rgba(255, 197, 51, 0.12), 0 0 14px rgba(255, 197, 51, 0.18);
+  color: #ffe28a;
+}
+
 .category-name {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -937,6 +944,16 @@ body.dragging-files .app-frame {
   margin: 0;
 }
 
+.dialog-subtitle {
+  color: #9c9c9d;
+  font-size: 13px;
+  margin: -8px 0 0;
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .dialog-field {
   display: grid;
   gap: 8px;
@@ -959,6 +976,61 @@ body.dragging-files .app-frame {
 
 .dialog-field input:focus {
   border-color: #57c1ff;
+}
+
+.tag-dialog {
+  min-width: min(420px, calc(100vw - 48px));
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+}
+
+.tag-pill.editable {
+  align-items: center;
+  background: #171819;
+  border: 1px solid #303235;
+  border-radius: 999px;
+  color: #ffffff;
+  display: inline-flex;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 30px;
+  padding: 6px 9px 6px 12px;
+}
+
+.tag-pill.editable:hover {
+  background: #202123;
+  border-color: #45484b;
+}
+
+.tag-pill.editable span {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tag-pill.editable strong {
+  align-items: center;
+  background: #2b2d30;
+  border-radius: 999px;
+  color: #d8d9da;
+  display: grid;
+  font-size: 14px;
+  height: 18px;
+  justify-items: center;
+  line-height: 1;
+  width: 18px;
+}
+
+.tag-empty-state {
+  color: #6a6b6c;
+  font-size: 13px;
+  margin: -6px 0 0;
 }
 
 .dialog-actions {

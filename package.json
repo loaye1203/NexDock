@@ -1,7 +1,7 @@
 {
-  "name": "electron-demo-app",
+  "name": "nexdock",
   "version": "0.1.0",
-  "description": "Minimal Electron desktop app demo.",
+  "description": "NexDock desktop launcher demo.",
   "main": "main.js",
   "private": true,
   "scripts": {

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DeskDock</title>
+    <title>NexDock</title>
     <link rel="stylesheet" href="./src/style.css">
   </head>
   <body>
@@ -11,8 +11,8 @@
       <header class="window-bar">
         <div class="window-brand">
           <div class="brand-chip">
-            <div class="brand-mark small">D</div>
-            <strong>DeskDock</strong>
+            <div class="brand-mark small">N</div>
+            <strong>NexDock</strong>
           </div>
         </div>
 
@@ -100,6 +100,12 @@
       <button data-action="remove" class="danger" type="button">删除</button>
     </div>
 
+    <div class="menu" id="categoryContextMenu" role="menu" aria-hidden="true">
+      <button data-action="rename" type="button">重命名</button>
+      <button id="categoryPinMenuButton" data-action="pin" type="button">置顶</button>
+      <button data-action="remove" class="danger" type="button">删除</button>
+    </div>
+
     <div class="dialog-backdrop" id="categoryDialog" aria-hidden="true">
       <form class="dialog" id="categoryDialogForm">
         <h2 id="categoryDialogTitle">添加分类</h2>
@@ -114,6 +120,23 @@
         <div class="dialog-actions">
           <button class="dialog-button secondary" id="cancelCategoryDialog" type="button">取消</button>
           <button class="dialog-button primary" type="submit">确定</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="dialog-backdrop" id="tagDialog" aria-hidden="true">
+      <form class="dialog tag-dialog" id="tagDialogForm">
+        <h2>管理标签</h2>
+        <p class="dialog-subtitle" id="tagDialogItemName"></p>
+        <label class="dialog-field" for="tagNameInput">
+          <span>新标签</span>
+          <input id="tagNameInput" type="text" autocomplete="off" maxlength="24" placeholder="输入后按回车添加">
+        </label>
+        <div class="tag-list" id="tagList"></div>
+        <p class="tag-empty-state" id="tagEmptyState">还没有标签</p>
+        <div class="dialog-actions">
+          <button class="dialog-button secondary" id="cancelTagDialog" type="button">取消</button>
+          <button class="dialog-button primary" id="saveTagDialog" type="button">保存</button>
         </div>
       </form>
     </div>

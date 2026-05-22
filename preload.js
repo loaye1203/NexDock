@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     syncIcon: (id) => ipcRenderer.invoke('launcher:sync-icon', id),
     addCategory: (category) => ipcRenderer.invoke('launcher:add-category', category),
     renameCategory: (id, category) => ipcRenderer.invoke('launcher:rename-category', { id, ...category }),
+    removeCategory: (id) => ipcRenderer.invoke('launcher:remove-category', id),
+    setCategoryPinned: (id, pinned) => ipcRenderer.invoke('launcher:set-category-pinned', { id, pinned }),
     sortCategories: (orderedCategoryIds) => ipcRenderer.invoke('launcher:sort-categories', orderedCategoryIds),
     sortItems: (payload) => ipcRenderer.invoke('launcher:sort-items', payload),
     pickFiles: () => ipcRenderer.invoke('dialog:pick-files'),
