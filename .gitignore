@@ -1,0 +1,15 @@
+node_modules/
+dist/
+out/
+build/
+release/
+.vite/
+.cache/
+*.log
+.electron-direct.*.log
+.local-test.*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

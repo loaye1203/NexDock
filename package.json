@@ -1,0 +1,13 @@
+{
+  "name": "electron-demo-app",
+  "version": "0.1.0",
+  "description": "Minimal Electron desktop app demo.",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}

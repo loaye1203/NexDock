@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeskDock</title>
+    <link rel="stylesheet" href="./src/style.css">
+  </head>
+  <body>
+    <div class="app-frame">
+      <header class="window-bar">
+        <div class="window-brand">
+          <div class="brand-chip">
+            <div class="brand-mark small">D</div>
+            <strong>DeskDock</strong>
+          </div>
+        </div>
+
+        <label class="title-search" for="searchInput">
+          <span>搜索</span>
+          <input id="searchInput" type="search" placeholder="搜索软件、文件夹或标签">
+          <kbd>Ctrl K</kbd>
+        </label>
+
+        <div class="window-toolbar" aria-label="快捷操作">
+          <button class="tool-button" id="syncVisibleIcons" type="button" aria-label="同步当前图标" title="同步当前图标">
+            <span class="signal-dot"></span>
+            <span class="tool-icon sync-icon"></span>
+          </button>
+          <button class="tool-button" id="addFileButton" type="button" aria-label="添加入口" title="添加入口">
+            <span class="tool-icon add-icon"></span>
+          </button>
+          <button class="tool-button" id="addFolderButton" type="button" aria-label="添加文件夹" title="添加文件夹">
+            <span class="tool-icon folder-icon"></span>
+          </button>
+        </div>
+
+        <div class="window-controls" aria-label="窗口控制">
+          <button class="window-control" id="minimizeWindow" type="button" aria-label="最小化" title="最小化"></button>
+          <button class="window-control maximize" id="maximizeWindow" type="button" aria-label="最大化" title="最大化"></button>
+          <button class="window-control close" id="closeWindow" type="button" aria-label="关闭" title="关闭"></button>
+        </div>
+      </header>
+
+      <main class="shell" aria-label="桌面入口管理器">
+        <aside class="sidebar">
+          <nav class="category-list" id="categoryList" aria-label="分类"></nav>
+          <button class="add-category-button" id="addCategoryButton" type="button">添加分类</button>
+
+          <div class="sidebar-footer">
+            <button class="settings-button" id="settingsButton" type="button" aria-label="设置" title="设置">
+              <span class="gear-icon" aria-hidden="true"></span>
+            </button>
+          </div>
+        </aside>
+
+        <section class="workspace">
+          <section class="content-head">
+            <div>
+              <p class="eyebrow" id="activeCategoryLabel">全部入口</p>
+            </div>
+            <p id="itemCount">0 个入口</p>
+          </section>
+
+          <section class="grid" id="itemGrid" aria-live="polite"></section>
+
+          <section class="empty-state" id="emptyState">
+            <strong>还没有入口</strong>
+            <span>拖动文件进来，或点击右上角添加。</span>
+          </section>
+
+          <footer class="statusbar">
+            <span id="statusText">准备就绪</span>
+            <span>右键入口可编辑、删除或打开所在位置</span>
+          </footer>
+        </section>
+      </main>
+
+      <main class="settings-page" id="settingsPage" aria-label="设置" hidden>
+        <section class="settings-head">
+          <button class="back-button" id="backHomeButton" type="button" aria-label="返回主页" title="返回主页">
+            <span aria-hidden="true">←</span>
+          </button>
+          <h1>设置</h1>
+        </section>
+        <section class="settings-panel">
+          <h2>启动器设置</h2>
+          <p>这里用于后续放置外观、快捷键和数据管理选项。</p>
+        </section>
+      </main>
+    </div>
+
+    <div class="menu" id="contextMenu" role="menu" aria-hidden="true">
+      <button data-action="open" type="button">打开</button>
+      <button data-action="rename" type="button">重命名</button>
+      <button data-action="tags" type="button">添加标签</button>
+      <button data-action="move" type="button">移动分类</button>
+      <button data-action="sync" type="button">同步图标</button>
+      <button data-action="reveal" type="button">打开所在位置</button>
+      <button data-action="remove" class="danger" type="button">删除</button>
+    </div>
+
+    <div class="dialog-backdrop" id="categoryDialog" aria-hidden="true">
+      <form class="dialog" id="categoryDialogForm">
+        <h2 id="categoryDialogTitle">添加分类</h2>
+        <label class="dialog-field" for="categoryNameInput">
+          <span>分类名</span>
+          <input id="categoryNameInput" type="text" autocomplete="off" maxlength="36">
+        </label>
+        <label class="dialog-field" for="categoryIconInput">
+          <span>图标内容</span>
+          <input id="categoryIconInput" type="text" autocomplete="off" maxlength="4">
+        </label>
+        <div class="dialog-actions">
+          <button class="dialog-button secondary" id="cancelCategoryDialog" type="button">取消</button>
+          <button class="dialog-button primary" type="submit">确定</button>
+        </div>
+      </form>
+    </div>
+
+    <script src="./src/renderer.js"></script>
+  </body>
+</html>
