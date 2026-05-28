@@ -89,6 +89,27 @@ function normalizeTags(tags) {
     : [];
 }
 
+function normalizeItemCategoryIds(item) {
+  const categoryIds = [];
+
+  if (Array.isArray(item?.categoryIds)) {
+    categoryIds.push(...item.categoryIds);
+  }
+
+  if (typeof item?.categoryId === 'string') {
+    categoryIds.push(item.categoryId);
+  }
+
+  return [...new Set(
+    categoryIds
+      .filter((categoryId) => typeof categoryId === 'string' && categoryId && categoryId !== 'all'),
+  )];
+}
+
+function itemBelongsToCategory(item, categoryId) {
+  return categoryId === 'all' || normalizeItemCategoryIds(item).includes(categoryId);
+}
+
 function normalizeItems(items) {
   return Array.isArray(items)
     ? items
@@ -100,13 +121,17 @@ function normalizeItems(items) {
             && typeof item.path === 'string'
           );
         })
-        .map((item, index) => ({
-          ...item,
-          name: item.name.trim(),
-          tags: normalizeTags(item.tags),
-          categoryId: typeof item.categoryId === 'string' && item.categoryId ? item.categoryId : 'all',
-          order: Number.isFinite(item.order) ? item.order : index,
-        }))
+        .map((item, index) => {
+          const { categoryId, categoryIds, ...normalizedItem } = item;
+
+          return {
+            ...normalizedItem,
+            name: item.name.trim(),
+            tags: normalizeTags(item.tags),
+            categoryIds: normalizeItemCategoryIds(item),
+            order: Number.isFinite(item.order) ? item.order : index,
+          };
+        })
     : [];
 }
 
@@ -135,7 +160,14 @@ async function readStore() {
     const raw = await fs.readFile(dataFilePath, 'utf8');
     const parsed = JSON.parse(raw);
 
-    return normalizeStore(parsed);
+    const store = normalizeStore(parsed);
+    const migratedStore = await migrateShortcutEntries(store);
+
+    if (migratedStore.changed) {
+      await writeStore(migratedStore.store);
+    }
+
+    return migratedStore.store;
   } catch {
     return createEmptyStore();
   }
@@ -152,6 +184,12 @@ function makeId() {
 
 function normalizePath(inputPath) {
   return path.normalize(inputPath);
+}
+
+function storePathKey(inputPath) {
+  return isUrlTarget(inputPath)
+    ? inputPath.trim().toLowerCase()
+    : normalizePath(inputPath).toLowerCase();
 }
 
 async function pathExists(targetPath) {
@@ -215,6 +253,30 @@ function normalizeShortcutIconPath(iconPath, shortcutPath) {
     : path.normalize(path.join(path.dirname(shortcutPath), cleanPath));
 }
 
+function isUrlTarget(value) {
+  return /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(value) && !/^[a-zA-Z]:[\\/]/.test(value);
+}
+
+function normalizeShortcutTargetPath(targetPath, shortcutPath) {
+  if (!targetPath || typeof targetPath !== 'string') {
+    return null;
+  }
+
+  const cleanPath = expandWindowsEnvVars(targetPath.trim().replace(/^"|"$/g, ''));
+
+  if (!cleanPath) {
+    return null;
+  }
+
+  if (isUrlTarget(cleanPath)) {
+    return cleanPath;
+  }
+
+  return path.isAbsolute(cleanPath)
+    ? path.normalize(cleanPath)
+    : path.normalize(path.join(path.dirname(shortcutPath), cleanPath));
+}
+
 function decodeShortcutText(buffer) {
   if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
     return buffer.toString('utf16le');
@@ -268,6 +330,56 @@ async function readUrlShortcutDetails(targetPath) {
     return details.icon || details.target ? details : null;
   } catch {
     return null;
+  }
+}
+
+async function resolveShortcutLaunchTarget(targetPath, type) {
+  if (type !== 'shortcut') {
+    return null;
+  }
+
+  const shortcutDetails = readShortcutDetails(targetPath);
+
+  if (shortcutDetails?.target) {
+    const launchPath = normalizeShortcutTargetPath(shortcutDetails.target, targetPath);
+
+    if (launchPath) {
+      return {
+        path: launchPath,
+        args: typeof shortcutDetails.args === 'string' && shortcutDetails.args.trim()
+          ? shortcutDetails.args.trim()
+          : null,
+        sourcePath: targetPath,
+      };
+    }
+  }
+
+  const urlShortcutDetails = await readUrlShortcutDetails(targetPath);
+
+  if (urlShortcutDetails?.target) {
+    const launchPath = normalizeShortcutTargetPath(urlShortcutDetails.target, targetPath);
+
+    if (launchPath) {
+      return {
+        path: launchPath,
+        args: null,
+        sourcePath: targetPath,
+      };
+    }
+  }
+
+  return null;
+}
+
+async function detectStoredEntryType(targetPath, fallbackType = 'file') {
+  if (isUrlTarget(targetPath)) {
+    return 'shortcut';
+  }
+
+  try {
+    return await detectEntryType(targetPath);
+  } catch {
+    return fallbackType;
   }
 }
 
@@ -422,6 +534,102 @@ async function readIconDataUrl(targetPath, type) {
   return null;
 }
 
+async function readStoredItemIconDataUrl(item) {
+  const sourcePath = typeof item.sourcePath === 'string' && item.sourcePath ? item.sourcePath : null;
+  const launchPath = typeof item.path === 'string' && item.path ? item.path : null;
+  const candidates = [];
+
+  if (sourcePath && await pathExists(sourcePath)) {
+    candidates.push(sourcePath);
+  }
+
+  if (launchPath && !isUrlTarget(launchPath)) {
+    candidates.push(launchPath);
+  }
+
+  for (const candidate of [...new Set(candidates)]) {
+    const type = await detectStoredEntryType(candidate, item.type);
+    const iconDataUrl = await readIconDataUrl(candidate, type);
+
+    if (iconDataUrl) {
+      return iconDataUrl;
+    }
+  }
+
+  return item.iconDataUrl || null;
+}
+
+function splitLaunchArgs(args) {
+  const parts = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const char = args[index];
+
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      continue;
+    }
+
+    if (/\s/.test(char) && !inQuotes) {
+      if (current) {
+        parts.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    parts.push(current);
+  }
+
+  return parts;
+}
+
+async function openStoredItem(item) {
+  if (isUrlTarget(item.path)) {
+    try {
+      await shell.openExternal(item.path);
+      return '';
+    } catch (error) {
+      return error.message;
+    }
+  }
+
+  if (typeof item.launchArgs === 'string' && item.launchArgs.trim()) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const child = execFile(
+        item.path,
+        splitLaunchArgs(item.launchArgs.trim()),
+        {
+          detached: true,
+          windowsHide: false,
+        },
+      );
+
+      child.once('spawn', () => {
+        settled = true;
+        child.unref();
+        resolve('');
+      });
+
+      child.once('error', (error) => {
+        if (!settled) {
+          settled = true;
+          resolve(error.message);
+        }
+      });
+    });
+  }
+
+  return shell.openPath(item.path);
+}
+
 async function createEntry(targetPath, preferredCategoryId) {
   const normalizedPath = normalizePath(targetPath);
 
@@ -430,19 +638,56 @@ async function createEntry(targetPath, preferredCategoryId) {
   }
 
   const type = await detectEntryType(normalizedPath);
+  const shortcutLaunchTarget = await resolveShortcutLaunchTarget(normalizedPath, type);
+  const launchPath = shortcutLaunchTarget?.path || normalizedPath;
+  const launchType = await detectStoredEntryType(launchPath, type);
 
   return {
     id: makeId(),
     name: displayNameForPath(normalizedPath),
-    type,
-    path: normalizedPath,
+    type: launchType,
+    path: launchPath,
+    sourcePath: shortcutLaunchTarget?.sourcePath || null,
+    launchArgs: shortcutLaunchTarget?.args || null,
     iconDataUrl: await readIconDataUrl(normalizedPath, type),
-    categoryId: preferredCategoryId || 'all',
+    categoryIds: preferredCategoryId ? [preferredCategoryId] : [],
     tags: [],
     order: 0,
     createdAt: new Date().toISOString(),
     lastOpenedAt: null,
   };
+}
+
+async function migrateShortcutEntries(store) {
+  let changed = false;
+
+  for (const item of store.items) {
+    const itemPath = typeof item.path === 'string' ? item.path : '';
+    const itemExt = path.extname(itemPath).toLowerCase();
+    const needsMigration = (item.type === 'shortcut' || itemExt === '.lnk' || itemExt === '.url')
+      && !item.sourcePath
+      && !item.launchArgs
+      && (itemExt === '.lnk' || itemExt === '.url');
+
+    if (!needsMigration || !(await pathExists(itemPath))) {
+      continue;
+    }
+
+    const shortcutLaunchTarget = await resolveShortcutLaunchTarget(itemPath, 'shortcut');
+
+    if (!shortcutLaunchTarget?.path) {
+      continue;
+    }
+
+    item.sourcePath = itemPath;
+    item.path = shortcutLaunchTarget.path;
+    item.launchArgs = shortcutLaunchTarget.args || null;
+    item.type = await detectStoredEntryType(item.path, item.type);
+    item.iconDataUrl = item.iconDataUrl || await readStoredItemIconDataUrl(item);
+    changed = true;
+  }
+
+  return { store, changed };
 }
 
 function publicStore(store) {
@@ -499,14 +744,25 @@ app.whenReady().then(() => {
     const categoryId = store.categories.some((category) => category.id === payload.categoryId && category.type !== 'system')
       ? payload.categoryId
       : undefined;
-    const existing = new Set(store.items.map((item) => normalizePath(item.path).toLowerCase()));
+    const existing = new Set();
+
+    for (const item of store.items) {
+      if (typeof item.path === 'string' && item.path) {
+        existing.add(storePathKey(item.path));
+      }
+
+      if (typeof item.sourcePath === 'string' && item.sourcePath) {
+        existing.add(storePathKey(item.sourcePath));
+      }
+    }
+
     const added = [];
     const skipped = [];
 
     for (const targetPath of paths) {
       try {
         const normalizedPath = normalizePath(targetPath);
-        const duplicateKey = normalizedPath.toLowerCase();
+        const duplicateKey = storePathKey(normalizedPath);
 
         if (existing.has(duplicateKey)) {
           skipped.push({ path: normalizedPath, reason: 'duplicate' });
@@ -514,9 +770,19 @@ app.whenReady().then(() => {
         }
 
         const entry = await createEntry(normalizedPath, categoryId);
+        const entryKeys = [
+          entry.path,
+          entry.sourcePath,
+        ].filter((value) => typeof value === 'string' && value).map(storePathKey);
+
+        if (entryKeys.some((key) => existing.has(key))) {
+          skipped.push({ path: normalizedPath, reason: 'duplicate' });
+          continue;
+        }
+
         entry.order = store.items.length;
         store.items.push(entry);
-        existing.add(duplicateKey);
+        entryKeys.forEach((key) => existing.add(key));
         added.push(entry);
       } catch (error) {
         skipped.push({ path: targetPath, reason: error.message });
@@ -580,9 +846,7 @@ app.whenReady().then(() => {
 
     store.categories = store.categories.filter((entry) => entry.id !== id);
     store.items.forEach((item) => {
-      if (item.categoryId === id) {
-        item.categoryId = 'all';
-      }
+      item.categoryIds = normalizeItemCategoryIds(item).filter((categoryId) => categoryId !== id);
     });
 
     await writeStore(store);
@@ -642,15 +906,18 @@ app.whenReady().then(() => {
       item.name = payload.name.trim();
     }
 
-    if (typeof payload.categoryId === 'string' && payload.categoryId) {
+    if (typeof payload.categoryId === 'string' && payload.categoryId && payload.categoryId !== 'all') {
       const nextCategoryId = payload.categoryId;
-      const categoryChanged = item.categoryId !== nextCategoryId;
-      item.categoryId = nextCategoryId;
+      const categoryExists = store.categories.some((category) => {
+        return category.id === nextCategoryId && category.type !== 'system';
+      });
+      const currentCategoryIds = normalizeItemCategoryIds(item);
+      const categoryChanged = categoryExists && !currentCategoryIds.includes(nextCategoryId);
 
       if (categoryChanged) {
-        const targetItems = store.items.filter((entry) => entry.id !== item.id && entry.categoryId === nextCategoryId);
-        const maxOrder = targetItems.reduce((max, entry) => Math.max(max, Number.isFinite(entry.order) ? entry.order : 0), -1);
-        item.order = maxOrder + 1;
+        item.categoryIds = [...currentCategoryIds, nextCategoryId];
+      } else {
+        item.categoryIds = currentCategoryIds;
       }
     }
 
@@ -668,7 +935,7 @@ app.whenReady().then(() => {
     const orderedIdSet = new Set(orderedItemIds);
     const categoryId = typeof payload.categoryId === 'string' && payload.categoryId ? payload.categoryId : 'all';
     const scopedItems = store.items
-      .filter((item) => categoryId === 'all' || item.categoryId === categoryId)
+      .filter((item) => itemBelongsToCategory(item, categoryId))
       .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, 'zh-CN'));
     const byId = new Map(scopedItems.map((item) => [item.id, item]));
     const sorted = [];
@@ -704,7 +971,7 @@ app.whenReady().then(() => {
       throw new Error('入口不存在');
     }
 
-    const result = await shell.openPath(item.path);
+    const result = await openStoredItem(item);
 
     if (result) {
       throw new Error(result);
@@ -723,7 +990,15 @@ app.whenReady().then(() => {
       throw new Error('入口不存在');
     }
 
-    shell.showItemInFolder(item.path);
+    const revealPath = typeof item.path === 'string' && item.path && !isUrlTarget(item.path)
+      ? item.path
+      : item.sourcePath;
+
+    if (!revealPath || !(await pathExists(revealPath))) {
+      throw new Error('鎵€鍦ㄤ綅缃笉瀛樺湪');
+    }
+
+    shell.showItemInFolder(revealPath);
     return true;
   });
 
@@ -735,8 +1010,8 @@ app.whenReady().then(() => {
       throw new Error('入口不存在');
     }
 
-    item.type = await detectEntryType(item.path);
-    item.iconDataUrl = await readIconDataUrl(item.path, item.type);
+    item.type = await detectStoredEntryType(item.path, item.type);
+    item.iconDataUrl = await readStoredItemIconDataUrl(item);
     await writeStore(store);
     return publicStore(store);
   });

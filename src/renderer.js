@@ -14,6 +14,7 @@ const state = {
   dragReadyCategoryId: null,
   suppressCategoryClick: false,
   categoryDialogResolve: null,
+  confirmDialogResolve: null,
   tagDialogItemId: null,
   tagDialogTags: [],
 };
@@ -66,6 +67,11 @@ const tagList = document.querySelector('#tagList');
 const tagEmptyState = document.querySelector('#tagEmptyState');
 const cancelTagDialogButton = document.querySelector('#cancelTagDialog');
 const saveTagDialogButton = document.querySelector('#saveTagDialog');
+const confirmDialog = document.querySelector('#confirmDialog');
+const confirmDialogTitle = document.querySelector('#confirmDialogTitle');
+const confirmDialogMessage = document.querySelector('#confirmDialogMessage');
+const cancelConfirmDialogButton = document.querySelector('#cancelConfirmDialog');
+const confirmDialogActionButton = document.querySelector('#confirmDialogAction');
 
 function setStatus(message) {
   statusText.textContent = message;
@@ -126,6 +132,27 @@ function itemTags(item) {
     : [];
 }
 
+function itemCategoryIds(item) {
+  const categoryIds = [];
+
+  if (Array.isArray(item.categoryIds)) {
+    categoryIds.push(...item.categoryIds);
+  }
+
+  if (typeof item.categoryId === 'string') {
+    categoryIds.push(item.categoryId);
+  }
+
+  return [...new Set(
+    categoryIds
+      .filter((categoryId) => typeof categoryId === 'string' && categoryId && categoryId !== 'all'),
+  )];
+}
+
+function itemBelongsToCategory(item, categoryId) {
+  return categoryId === 'all' || itemCategoryIds(item).includes(categoryId);
+}
+
 function itemOrder(item) {
   return Number.isFinite(item.order) ? item.order : 0;
 }
@@ -148,7 +175,7 @@ function filteredItems() {
         return true;
       }
 
-      return item.categoryId === state.activeCategoryId;
+      return itemBelongsToCategory(item, state.activeCategoryId);
     })
     .filter((item) => {
       if (!query) {
@@ -167,7 +194,23 @@ function countForCategory(categoryId) {
     return state.items.length;
   }
 
-  return state.items.filter((item) => item.categoryId === categoryId).length;
+  return state.items.filter((item) => itemBelongsToCategory(item, categoryId)).length;
+}
+
+function clearCategoryDropPreview() {
+  categoryList.querySelectorAll('.category.drag-over').forEach((categoryButton) => {
+    categoryButton.classList.remove('drag-over');
+  });
+}
+
+function categoryDropTargetFromEvent(event) {
+  const target = event.target.closest('.category[data-id]');
+
+  if (!target || !categoryList.contains(target)) {
+    return null;
+  }
+
+  return target;
 }
 
 function renderCategories() {
@@ -207,33 +250,6 @@ function renderCategories() {
       state.activeCategoryId = category.id;
       render();
     });
-    button.addEventListener('dragover', (event) => {
-      if (!state.draggedItemId) {
-        return;
-      }
-
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      button.classList.add('drag-over');
-    });
-    button.addEventListener('dragleave', () => {
-      if (state.draggedItemId) {
-        button.classList.remove('drag-over');
-      }
-    });
-    button.addEventListener('drop', async (event) => {
-      const draggedItemId = state.draggedItemId || event.dataTransfer.getData('text/plain');
-
-      if (!draggedItemId) {
-        return;
-      }
-
-      event.preventDefault();
-      button.classList.remove('drag-over');
-      state.itemDragCommitted = true;
-      await moveItemToCategory(draggedItemId, category.id);
-    });
-
     if (isCustom) {
       let pressTimer = null;
 
@@ -392,7 +408,7 @@ function renderItem(item) {
     pressTimer = window.setTimeout(() => {
       state.dragReadyItemId = item.id;
       card.classList.add('drag-ready');
-      setStatus('继续拖动图标可调整顺序或移动分类');
+      setStatus('继续拖动图标可调整顺序或加入分类');
     }, LONG_PRESS_DRAG_DELAY_MS);
   });
   card.addEventListener('pointerup', () => {
@@ -408,7 +424,7 @@ function renderItem(item) {
     }
 
     state.draggedItemId = item.id;
-    state.draggedItemCategoryId = item.categoryId;
+    state.draggedItemCategoryId = state.activeCategoryId;
     state.dragPreviewCategoryId = state.activeCategoryId;
     state.itemDragCommitted = false;
     event.dataTransfer.effectAllowed = 'move';
@@ -510,6 +526,32 @@ function openCategoryDialog({ title, name = '', icon = '' }) {
 
   return new Promise((resolve) => {
     state.categoryDialogResolve = resolve;
+  });
+}
+
+function closeConfirmDialog(confirmed = false) {
+  confirmDialog.classList.remove('visible');
+  confirmDialog.setAttribute('aria-hidden', 'true');
+
+  if (state.confirmDialogResolve) {
+    state.confirmDialogResolve(confirmed);
+    state.confirmDialogResolve = null;
+  }
+}
+
+function openConfirmDialog({ title, message, confirmLabel = '删除' }) {
+  confirmDialogTitle.textContent = title;
+  confirmDialogMessage.textContent = message;
+  confirmDialogActionButton.textContent = confirmLabel;
+  confirmDialog.classList.add('visible');
+  confirmDialog.setAttribute('aria-hidden', 'false');
+
+  window.setTimeout(() => {
+    cancelConfirmDialogButton.focus();
+  }, 0);
+
+  return new Promise((resolve) => {
+    state.confirmDialogResolve = resolve;
   });
 }
 
@@ -685,7 +727,13 @@ async function removeCategory(id) {
     return;
   }
 
-  if (!confirm(`删除分类「${category.name}」？该分类下的图标会回到全部。`)) {
+  const confirmed = await openConfirmDialog({
+    title: '删除分类',
+    message: `删除分类「${category.name}」？该分类下的图标会回到全部。`,
+    confirmLabel: '删除',
+  });
+
+  if (!confirmed) {
     return;
   }
 
@@ -772,7 +820,17 @@ async function openItem(id) {
 async function removeItem(id) {
   const item = state.items.find((entry) => entry.id === id);
 
-  if (!item || !confirm(`删除「${item.name}」？`)) {
+  if (!item) {
+    return;
+  }
+
+  const confirmed = await openConfirmDialog({
+    title: '删除入口',
+    message: `删除「${item.name}」？`,
+    confirmLabel: '删除',
+  });
+
+  if (!confirmed) {
     return;
   }
 
@@ -813,10 +871,15 @@ async function moveItem(id) {
   }
 
   const message = choices.map((entry, index) => `${index + 1}. ${entry.name}`).join('\n');
-  const input = prompt(`移动到哪个分类？\n${message}`, '1');
+  const input = prompt(`加入哪个分类？\n${message}`, '1');
   const index = Number(input) - 1;
 
   if (!item || !choices[index]) {
+    return;
+  }
+
+  if (itemBelongsToCategory(item, choices[index].id)) {
+    setStatus(`已在「${choices[index].name}」中`);
     return;
   }
 
@@ -827,7 +890,7 @@ async function moveItem(id) {
   state.categories = store.categories;
   state.items = store.items;
   render();
-  setStatus('分类已更新');
+  setStatus(`已加入「${choices[index].name}」`);
 }
 
 async function moveItemToCategory(id, categoryId) {
@@ -838,6 +901,16 @@ async function moveItemToCategory(id, categoryId) {
     return;
   }
 
+  if (category.id === 'all') {
+    setStatus('全部会显示所有图标');
+    return;
+  }
+
+  if (itemBelongsToCategory(item, categoryId)) {
+    setStatus(`已在「${category.name}」中`);
+    return;
+  }
+
   try {
     const store = await window.electronAPI.launcher.updateItem({
       id,
@@ -845,11 +918,10 @@ async function moveItemToCategory(id, categoryId) {
     });
     state.categories = store.categories;
     state.items = store.items;
-    state.activeCategoryId = categoryId;
     render();
-    setStatus(`已移动到${category.name}`);
+    setStatus(`已加入「${category.name}」`);
   } catch (error) {
-    setStatus(`移动分类失败：${error.message}`);
+    setStatus(`加入分类失败：${error.message}`);
   }
 }
 
@@ -1033,6 +1105,65 @@ tagDialog.addEventListener('click', (event) => {
   }
 });
 
+cancelConfirmDialogButton.addEventListener('click', () => {
+  closeConfirmDialog(false);
+});
+
+confirmDialogActionButton.addEventListener('click', () => {
+  closeConfirmDialog(true);
+});
+
+confirmDialog.addEventListener('click', (event) => {
+  if (event.target === confirmDialog) {
+    closeConfirmDialog(false);
+  }
+});
+
+categoryList.addEventListener('dragover', (event) => {
+  if (!state.draggedItemId) {
+    return;
+  }
+
+  const target = categoryDropTargetFromEvent(event);
+
+  if (!target) {
+    clearCategoryDropPreview();
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  event.dataTransfer.dropEffect = target.dataset.id === 'all' ? 'none' : 'move';
+  clearCategoryDropPreview();
+
+  if (target.dataset.id !== 'all') {
+    target.classList.add('drag-over');
+  }
+}, true);
+
+categoryList.addEventListener('dragleave', (event) => {
+  if (!state.draggedItemId || categoryList.contains(event.relatedTarget)) {
+    return;
+  }
+
+  clearCategoryDropPreview();
+}, true);
+
+categoryList.addEventListener('drop', async (event) => {
+  const draggedItemId = state.draggedItemId;
+  const target = categoryDropTargetFromEvent(event);
+
+  if (!draggedItemId || !target) {
+    return;
+  }
+
+  event.preventDefault();
+  event.stopPropagation();
+  clearCategoryDropPreview();
+  state.itemDragCommitted = true;
+  await moveItemToCategory(draggedItemId, target.dataset.id);
+}, true);
+
 searchInput.addEventListener('input', (event) => {
   state.query = event.target.value;
   renderItems();
@@ -1161,6 +1292,11 @@ document.addEventListener('keydown', (event) => {
 
     if (tagDialog.classList.contains('visible')) {
       closeTagDialog();
+      return;
+    }
+
+    if (confirmDialog.classList.contains('visible')) {
+      closeConfirmDialog(false);
       return;
     }
 

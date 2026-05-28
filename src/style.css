@@ -437,7 +437,8 @@ body.dragging-files .app-frame {
 
 .category.drag-over {
   background: #181b1f;
-  box-shadow: 0 -1px 0 rgba(87, 193, 255, 0.72) inset;
+  box-shadow: 0 0 0 1px rgba(87, 193, 255, 0.72) inset, 0 0 18px rgba(87, 193, 255, 0.12);
+  color: #ffffff;
 }
 
 .category strong {
@@ -982,6 +983,19 @@ body.dragging-files .app-frame {
   min-width: min(420px, calc(100vw - 48px));
 }
 
+.confirm-dialog {
+  min-width: min(380px, calc(100vw - 48px));
+}
+
+.dialog-message {
+  color: #d8d9da;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: -4px 0 0;
+  max-width: 420px;
+  overflow-wrap: anywhere;
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;
@@ -1056,6 +1070,15 @@ body.dragging-files .app-frame {
   background: #191a1c;
   border: 1px solid #303235;
   color: #ffffff;
+}
+
+.dialog-button.danger {
+  background: #ff6161;
+  color: #090a0b;
+}
+
+.dialog-button.danger:hover {
+  background: #ff7676;
 }
 
 @media (max-width: 760px) {

@@ -141,6 +141,17 @@
       </form>
     </div>
 
+    <div class="dialog-backdrop" id="confirmDialog" aria-hidden="true">
+      <section class="dialog confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirmDialogTitle">
+        <h2 id="confirmDialogTitle">确认操作</h2>
+        <p class="dialog-message" id="confirmDialogMessage"></p>
+        <div class="dialog-actions">
+          <button class="dialog-button secondary" id="cancelConfirmDialog" type="button">取消</button>
+          <button class="dialog-button danger" id="confirmDialogAction" type="button">删除</button>
+        </div>
+      </section>
+    </div>
+
     <script src="./src/renderer.js"></script>
   </body>
 </html>
